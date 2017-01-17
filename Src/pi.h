@@ -9,7 +9,7 @@ File name:       PI.H
 typedef   float   _iq;
 #define   _IQ(A)  (A)
 #define   _IQmpy(A,B)  ((A) * (B))
-#define   _IQsat(A, Pos, Neg)  (fmaxf(((fminf((A),(Pos)))),(Neg)))
+#define   _IQsat(A, Pos, Neg) A>Pos?Pos:A<Neg?Neg:A	 
 
 typedef struct {  _iq  Ref;   			// Input: reference set-point
 				  _iq  Fbk;   			// Input: feedback
@@ -52,7 +52,7 @@ Default initalisation values for the PI_GRANDO objects
 #define PI_MACRO(v)												\
 																\
 	/* proportional term */ 									\
-	v.up = _IQmpy(v.Kp, (v.Fbk - v.Ref));						\
+	v.up = _IQmpy(v.Kp, (v.Ref - v.Fbk));						\
 																\
 	/* integral term */ 										\
 	v.ui = (v.Out == v.v1)?(_IQmpy(v.Ki, v.up)+ v.i1) : v.i1;	\

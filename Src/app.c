@@ -4,7 +4,6 @@
 */
 
 #include "main.h"
-#include "dma.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -19,12 +18,13 @@ uint8_t maxAdIndexFormer;  //maxAd对应的Index,判断结果
 uint8_t preIndex;   //当前灯号的上一个灯号，如3号灯 则上个灯号是2或0  和maxAdIndexFormer的区别是maxAdIndexFormer是AD值判断的结果，这个是灯的物理位置的判断结果
 uint32_t maxStay=0;	//最大值停留的时间
 uint8_t overPeak;	//当前AD值是否过了AD的尖峰点.这个设定问题很大。待解决
-uint8_t overPeakCount = 0; //过尖峰点的计算阈值
+uint32_t overPeakCount = 0; //过尖峰点的计算阈值
 int maxStayPre = 0;// 上一次最大值停留的时间
 int8_t Direction = 1; //转动方向 -1：正向 -1：反向
 float speed;					//旋转速度
 float speedPre;				//上次速度
 int speedMoni = 0;
+uint32_t overPeakCountDown = 0;
 uint32_t test = 0;   // use to test
 uint32_t topTenMax[10] = {0,0,0,0,0,0,0,0,0,0};
 uint32_t topTenMin[10] = {0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,0xffff};
@@ -45,6 +45,9 @@ uint32_t minAD;
 uint32_t maxAD; //上两个灯AD值的最大和最小值，用来进行下一次灯的数据归一化,取topTenMax的均值。
 uint32_t maxAdEachLight[4]; //各个灯一个周期内AD的最大值
 uint32_t changeMaxAd[4]; // 4个变换索引时的AD值大小
+uint32_t pre1,pre2,pre3,pre4,pre5;
+
+uint32_t maxMoni;
 //  0-1-2-3-0		changeMaxAd的索引分布	
 // 0-1-2-3-0			灯的分布，从左到右是旋转方向1
 float angleRaw;
@@ -53,6 +56,8 @@ float angle;
 float lambda;
 float angle180;
 float angle180Pre=0;
+uint32_t angle180Moni;
+uint32_t angleRaw180Moni;
 typedef struct
 {
 	uint8_t index[4];
@@ -167,9 +172,9 @@ void timer3DataProcess()
 		speed = speedPre;
 	else 											// 检测到速度已经低于上一帧的速度了  则重新计算速度
 		speed = 1 / ((float)maxStay*4.0f*0.001f)  * Direction;
-	if ((LightDataSort.data[0] > 2 * LightData.data[preIndex]) && LightDataSort.index[0] != maxIndex) // 如果最大变了，判读他大于上上一个索引的电压3倍以上三次，判断是新的峰值
+	if ((LightDataSort.data[0] >  1.01f*LightData.data[preIndex]) && LightDataSort.index[0] != maxIndex) // 如果最大变了，判读他大于上上一个索引的电压3倍以上三次，判断是新的峰值
 		countMax++;
-	if (countMax>2)  //连续三次 确定最大AD发生了变化
+	if (countMax>1)  //连续三次 确定最大AD发生了变化
 	{
 
 		speed = 1 / ((float)maxStay*4.0f*0.001f) * Direction;	 // (r/s)         get speed	
@@ -178,6 +183,13 @@ void timer3DataProcess()
 		maxStay = 0;
 		countMax = 0;
 		overPeak = 0;
+		
+		pre1 = LightDataSort.data[0] - 10;
+		pre2 = pre1;
+		pre3 = pre2;
+		pre4 = pre3;
+		pre5 = pre4;
+		
 		maxAD = sumArray(topTenMax,10)/10;
 		minAD = sumArray(topTenMin,10)/10;
 		
@@ -193,7 +205,7 @@ void timer3DataProcess()
 			maxAdEachLight[1] = sumArray(topTenMax1,10)/10;
 			maxAdEachLight[2] = sumArray(topTenMax2,10)/10;
 			maxAdEachLight[3] = sumArray(topTenMax3,10)/10;
-			
+
 			memset(topTenMax0,0x00,sizeof(topTenMax0));
 			memset(topTenMax1,0x00,sizeof(topTenMax1));
 			memset(topTenMax2,0x00,sizeof(topTenMax2));
@@ -290,35 +302,56 @@ void findAngel()//出bug了需要检查的地方
 	if(LightDataSort.data[0] < LightDataSortPre.data[0]) //最大的AD值开始减小了
 	{
 		overPeakCount ++;
-	  if(overPeakCount>8)
+	  if(overPeakCount>2)
+		{
 			overPeak = 1;
+			overPeakCountDown=0;
+		}
 	}
 	else																									//如果增加，overPeak置0,另外在最大值切换的时候，也将overPeak置0了。
 	{
-		overPeak = 0;
+		overPeakCountDown++;
+		if(overPeakCountDown>2)
+		{
+		  overPeak = 0;
+			overPeakCount = 0;
+		}
 	}
 
 	
 	if((Direction == 1 && overPeak == 1) || (Direction == -1 && overPeak == 0)) // 正向转速，最大不是当前，输出正向角度,反向转，最大是当前
 	{
-		if(Direction == 1) 
-			lambda = (maxAdEachLight[LightDataSort.index[0]] - LightDataSort.data[0]) / (maxAdEachLight[LightDataSort.index[0]] - changeMaxAd[maxAdIndexFormer]);
-		else
-			lambda = (maxAdEachLight[LightDataSort.index[0]] - LightDataSort.data[0]) / (maxAdEachLight[LightDataSort.index[0]] - changeMaxAd[LightDataSort.index[0]]);	
-		angleRaw = lambda * 0.7854f;
-		angle = angleRaw;
-		//if(maxAdIndex != ) 
+		if((maxAdEachLight[LightDataSort.index[0]] - changeMaxAd[LightDataSort.index[0]]) != 0) //防止除零
+			lambda = (float)(maxAdEachLight[LightDataSort.index[0]] - LightDataSort.data[0]) / (float)(maxAdEachLight[LightDataSort.index[0]] - changeMaxAd[LightDataSort.index[0]]);	
+		else 
+			lambda =1;
+		
+			if(lambda>1)
+				lambda =1;
+			else if (lambda<0)
+				lambda =0;	
+			angleRaw = lambda * 0.7854f;
+			angle = angleRaw;
 	}
 	else																										// 另外两种情况输出正角度。
 	{
-		if(Direction == 1) 
-			lambda = (maxAdEachLight[LightDataSort.index[0]] - LightDataSort.data[0]) / (maxAdEachLight[LightDataSort.index[0]] - changeMaxAd[LightDataSort.index[0]]);
-		else
-			lambda = (maxAdEachLight[LightDataSort.index[0]] - LightDataSort.data[0]) / (maxAdEachLight[LightDataSort.index[0]] - changeMaxAd[maxAdIndexFormer]);	
-		angleRaw = lambda * 0.7854f;
-		angle = -angleRaw;
+
+			if(LightDataSort.index[0] == 0 && (maxAdEachLight[LightDataSort.index[0]] - changeMaxAd[3])!=0)
+				lambda = (float)(maxAdEachLight[LightDataSort.index[0]] - LightDataSort.data[0]) / (float)(maxAdEachLight[LightDataSort.index[0]] - changeMaxAd[3]);	
+			else if(LightDataSort.index[0] != 0 && (maxAdEachLight[LightDataSort.index[0]] - changeMaxAd[LightDataSort.index[0]-1]) !=0)
+				lambda = (float)(maxAdEachLight[LightDataSort.index[0]] - LightDataSort.data[0]) / (float)(maxAdEachLight[LightDataSort.index[0]] - changeMaxAd[LightDataSort.index[0]-1]);	
+		  else
+				lambda =1;
+			
+			if(lambda>1)
+				lambda =1;
+			else if (lambda<0)
+				lambda =0;
+			angleRaw = lambda * 0.7854f;
+			angle = -angleRaw;
 	}
 	
+		
 		angle180 = angle/3.1416f*180.0f;
 		angleRaw180 = angleRaw/3.1416f*180.f;
 		angle180 = LightDataSort.index[0]*90 + angle180;
@@ -326,7 +359,11 @@ void findAngel()//出bug了需要检查的地方
 			angle180 -= 360;
 		else if (angle180 < 0)
 			angle180 += 360;
-		angle180 = 0.92f*angle180Pre+(1.0f-0.92f)*angle180;
+		angle180 = 0.95f*angle180Pre+(1.0f-0.95f)*angle180;
 		angle180Pre = angle180;
+		maxMoni = LightDataSort.data[0];
+		
+		angle180Moni = angle180;
+		angleRaw180Moni=angleRaw180;
 }
 
