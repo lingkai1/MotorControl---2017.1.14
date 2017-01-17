@@ -247,7 +247,6 @@ uint32_t sumArray(uint32_t *in, uint8_t len)
 	{
 		sum += in[i];
 	}
-	
 	return sum; 
 }
 
